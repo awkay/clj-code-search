@@ -1,0 +1,7 @@
+#!/bin/bash
+# Dump the full record for one function.
+# Usage: code-show [--db PATH] [--format plain|edn|json] QUALIFIED-NAME
+set -euo pipefail
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$HERE"
+exec bb show "$@"

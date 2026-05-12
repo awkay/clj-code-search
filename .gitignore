@@ -1,0 +1,5 @@
+.code-intelligence/
+.cpcache/
+.clj-kondo/.cache/
+*.log
+.claude

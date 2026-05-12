@@ -1,0 +1,53 @@
+{:pods  {org.babashka/go-sqlite3 {:version "0.3.9"}}
+ :paths ["." "test"]
+
+ ;; bbin install entry. Once published, `bbin install io.github.tonykay/claude-tools`
+ ;; creates a `code-search` command on PATH that runs scripts.main/-main.
+ :bbin/bin {code-search {:main-opts ["-m" "scripts.main"]}}
+
+ :tasks {test     {:doc  "Run clojure.test suite"
+                   :task (do (require 'clojure.test
+                                      'scripts.lib.sha-test
+                                      'scripts.lib.analysis-test
+                                      'scripts.lib.kondo-test
+                                      'scripts.lib.db-test)
+                             (let [run-tests (resolve 'clojure.test/run-tests)
+                                   {:keys [fail error]}
+                                   (run-tests 'scripts.lib.sha-test
+                                              'scripts.lib.analysis-test
+                                              'scripts.lib.kondo-test
+                                              'scripts.lib.db-test)]
+                               (System/exit (if (zero? (+ fail error)) 0 1))))}
+         nrepl    {:doc  "Start a babashka nREPL server on :1667"
+                   :task (do (require 'babashka.nrepl.server)
+                             ((resolve 'babashka.nrepl.server/start-server!)
+                              {:host "127.0.0.1" :port 1667})
+                             (println "bb nREPL listening on 127.0.0.1:1667")
+                             (deref (promise)))}
+
+         ;; Local-dev tasks. The same actions are available via the `code-search`
+         ;; binary once installed via bbin — these stay for hacking on the tool.
+         doctor    {:doc  "Check env (clj-kondo, claude, bb)"
+                    :task (do (require 'scripts.main)
+                              ((resolve 'scripts.main/-main) "doctor"))}
+         index     {:doc  "bb index [opts] SOURCE-DIR"
+                    :task (do (require 'scripts.main)
+                              (apply (resolve 'scripts.main/-main) "index" *command-line-args*))}
+         search    {:doc  "bb search [opts] QUERY..."
+                    :task (do (require 'scripts.main)
+                              (apply (resolve 'scripts.main/-main) "search" *command-line-args*))}
+         show      {:doc  "bb show [opts] QUALIFIED-NAME"
+                    :task (do (require 'scripts.main)
+                              (apply (resolve 'scripts.main/-main) "show" *command-line-args*))}
+         llm-help  {:doc  "Print CLAUDE.md instructions for AI agents"
+                    :task (do (require 'scripts.main)
+                              ((resolve 'scripts.main/-main) "llm-help"))}
+
+         rebuild-fts {:doc  "Rebuild functions_fts (apply tokenizer changes)"
+                      :task (do (require 'scripts.lib.db)
+                                ((resolve 'scripts.lib.db/rebuild-fts!)
+                                 ".code-intelligence/code-index.db")
+                                (println "FTS rebuilt"))}
+         validate  {:doc  "Phase 1 end-to-end validation against ../simplymeet"
+                    :task (do (require 'scripts.validate)
+                              ((resolve 'scripts.validate/-main)))}}}

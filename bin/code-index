@@ -1,0 +1,7 @@
+#!/bin/bash
+# Index a Clojure source tree.
+# Usage: code-index [--db PATH] [--model NAME] [--parallel N] [--force] SOURCE-DIR
+set -euo pipefail
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$HERE"
+exec bb index "$@"

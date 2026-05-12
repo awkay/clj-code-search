@@ -1,0 +1,7 @@
+#!/bin/bash
+# BM25 search over the function index.
+# Usage: code-search [--db PATH] [--limit N] [--mode or|and] [--format plain|edn|json] QUERY...
+set -euo pipefail
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$HERE"
+exec bb search "$@"
