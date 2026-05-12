@@ -7,7 +7,8 @@ A small babashka-native toolset that gives an AI coding agent on-demand access t
 - **Phase 1 (foundation + validation):** done
 - **Phase 2 (production indexer + CLIs):** done
 - **Phase 3 (distribution via bbin + tests + agent help):** done
-- **Phase 4 (instruction retrieval DB, MCP server):** deferred — separate feature, unblocked
+- **Phase 4 (instruction retrieval DB):** done — see `inst-search` below.
+- **MCP server:** still deferred — separate feature, unblocked.
 - **Embeddings:** deferred — FTS5 keyword search over AI-generated descriptions is sufficient on real queries (see Phase 1 findings below)
 
 ## Install
@@ -87,6 +88,32 @@ We use `claude -p --model haiku` under the user's Claude Max subscription.
 - Compared to qwen-coder:1.5b: qwen-1.5b made 4 major errors (wrong return types on HOFs/middleware/promise-returning fns); qwen-3b and Haiku had 0. We chose Haiku for both speed and accuracy. See `comparison_report.md` from the validation pass for the full audit.
 
 The Anthropic-API-direct path (using an API key, not Max) would be ~20× faster per call (no CLI startup), at the cost of separate billing.
+
+## `inst-search` — instruction retrieval (Component 2)
+
+A second binary installed from the same project (`:bbin/bin` carries both
+`code-search` and `inst-search`). Indexes a tree of markdown instructions
+into `.code-intelligence/instructions.db` and answers natural-language
+queries with **grouped output**: direct matches, prereqs (1-hop), and
+companion/extends (1-hop).
+
+Two LLM passes:
+
+1. **Pass 1 (isolated, sha-gated)** — per doc, `claude -p` emits
+   `{summary, explains[≤5], tags}`. Stored on `docs`.
+2. **Pass 2 (FTS-narrowed, composite-sha-gated)** — for each doc, FTS5
+   retrieves top-K candidate neighbors (default 25) by the doc's own
+   `explains + summary + body`; `claude -p` then **matches** against this
+   real catalog and labels edges as `prereq | companion | extends` with
+   confidence. Because the model picks from a fixed list rather than
+   generating prereqs in the abstract, hallucinated edges are bounded.
+
+CLI: `inst-search [search] QUERY...`, `inst-search index DIR`,
+`inst-search show PATH`, `inst-search gaps`, `inst-search llm-help`.
+
+DB is **project-local and checked in** so paths in the index resolve on
+every clone. See `/Users/tonykay/.claude/plans/let-s-talk-a-bit-goofy-gem.md`
+for the design rationale.
 
 ## Repository layout
 
@@ -258,10 +285,6 @@ Deterministic fields (`Calls:`, `Used by:`, etc.) are *not* in the prompt — th
 - **Throughput:** 25 fns in ~54s at parallel=20. ~2.5s amortized per fn. Index of 454 fns ran in ~9.5 min.
 
 ## Not yet built
-
-### Instruction retrieval database (PLAN's Component 2)
-
-A separate SQLite + FTS5 of markdown how-to files, retrieved on demand to keep agent context clean. Designed but unbuilt. Independent of the code index — can be added without changes here.
 
 ### MCP server
 

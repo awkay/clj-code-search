@@ -10,13 +10,17 @@
 (pods/load-pod 'org.babashka/go-sqlite3 "0.3.9")
 (require '[pod.babashka.go-sqlite3 :as sqlite])
 
-(defn- load-schema-sql
-  "Read the schema. Prefers the classpath resource (which works when this code
-   is shipped via bbin or jar) and falls back to a cwd-relative path (which
-   works during local dev when bb.edn :paths includes the project root)."
-  []
-  (or (some-> (io/resource "schema/code_index.sql") slurp)
-      (slurp "schema/code_index.sql")))
+(defn load-resource-sql
+  "Read a SQL file by resource path. Prefers the classpath (so it works when
+   shipped via bbin/jar) and falls back to cwd-relative (so it works during
+   local dev when :paths includes the project root). Returns the raw SQL
+   string."
+  [resource-path]
+  (or (some-> (io/resource resource-path) slurp)
+      (slurp resource-path)))
+
+(defn- load-schema-sql []
+  (load-resource-sql "schema/code_index.sql"))
 
 (defn- split-statements
   "Split SQL on `;` but only when we are at paren-depth 0 AND outside a
@@ -58,22 +62,30 @@
 
 (defn- comment-line? [^String l] (str/starts-with? (str/trim l) "--"))
 
-(defn- apply-schema! [db schema-sql]
+(defn apply-schema! [db schema-sql]
   (doseq [stmt (->> (split-statements schema-sql)
                     (remove (fn [s] (every? comment-line? (str/split-lines s)))))]
     (sqlite/execute! db [stmt])))
 
-(defn open
-  "Open (or create) the SQLite db, enable WAL, apply schema if functions table absent."
-  [path]
+(defn open-with-schema
+  "Open (or create) a SQLite db at `path`, enable WAL, and apply the schema
+   loaded from `schema-resource` iff `probe-table` is absent. Generic — used
+   for both the code index and the instructions index."
+  [path probe-table schema-resource]
   (io/make-parents path)
   (sqlite/execute! path ["PRAGMA journal_mode=WAL;"])
   (let [exists? (->> (sqlite/query path
-                                   ["SELECT name FROM sqlite_master WHERE type='table' AND name='functions'"])
+                                   ["SELECT name FROM sqlite_master WHERE type='table' AND name=?"
+                                    probe-table])
                      seq)]
     (when-not exists?
-      (apply-schema! path (load-schema-sql))))
+      (apply-schema! path (load-resource-sql schema-resource))))
   path)
+
+(defn open
+  "Open (or create) the SQLite db, enable WAL, apply schema if functions table absent."
+  [path]
+  (open-with-schema path "functions" "schema/code_index.sql"))
 
 (defn rebuild-fts!
   "Drop and recreate functions_fts + triggers (picks up tokenizer changes) and

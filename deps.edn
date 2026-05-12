@@ -5,4 +5,5 @@
 {:paths ["."]
 
  ;; bbin reads :bbin/bin here when installing as a git lib.
- :bbin/bin {code-search {:main-opts ["-m" "scripts.main"]}}}
+ :bbin/bin {code-search {:main-opts ["-m" "scripts.main"]}
+            inst-search {:main-opts ["-m" "scripts.instructions.main"]}}}
