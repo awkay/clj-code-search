@@ -69,14 +69,47 @@
       (when-let [start (str/index-of s "{")]
         (try (json/parse-string (subs s start) true) (catch Exception _ nil)))))
 
+(defn- usage-limit-wait-ms
+  "Inspect combined stdout/stderr from `claude -p` for a Max-subscription
+   usage-limit signal. Returns ms-to-sleep until reset, or nil if not detected.
+   Format is uncertain across CLI versions, so we match defensively."
+  [text]
+  (when text
+    (or
+      ;; e.g. "Claude AI usage limit reached|1736900000"
+     (when-let [[_ ts] (re-find #"(?i)usage limit reached\D{0,4}(\d{10,13})" text)]
+       (let [ts (Long/parseLong ts)
+             ms (if (< ts 1.0e12) (* 1000 ts) ts)
+             delta (- ms (System/currentTimeMillis))]
+         (max 0 (+ delta 30000))))
+      ;; Any other phrasing of the same condition: fall back to 1 hour.
+     (when (re-find #"(?i)usage limit|5-hour limit|rate limit" text)
+       (* 60 60 1000)))))
+
+(defn- sh-claude
+  "Shell out with usage-limit awareness. On limit, sleep until reset and retry
+   once. Returns the babashka.process result map."
+  [argv opts]
+  (let [result (p/sh argv opts)
+        blob   (str (:out result) "\n" (:err result))]
+    (if-let [wait (and (not (zero? (:exit result)))
+                       (usage-limit-wait-ms blob))]
+      (do
+        (binding [*out* *err*]
+          (println (format "[claude-cli] Usage limit hit; sleeping %.1f min for reset."
+                           (/ wait 60000.0))))
+        (Thread/sleep wait)
+        (p/sh argv opts))
+      result)))
+
 (defn- run-claude
   [model prompt]
-  (let [{:keys [out exit]} (p/sh ["claude" "-p"
-                                  "--model" model
-                                  "--no-session-persistence"
-                                  "--output-format" "text"
-                                  prompt]
-                                 {:out :string :err :string :timeout 120000})]
+  (let [{:keys [out exit]} (sh-claude ["claude" "-p"
+                                       "--model" model
+                                       "--no-session-persistence"
+                                       "--output-format" "text"
+                                       prompt]
+                                      {:out :string :err :string :timeout 120000})]
     (when (zero? exit) out)))
 
 (defn analyze-fn
@@ -155,7 +188,7 @@
                       "--output-format" "json"]
                resume-id (into ["--resume" resume-id])
                true      (conj prompt))
-        {:keys [out exit]} (p/sh argv {:out :string :err :string :timeout 600000})]
+        {:keys [out exit]} (sh-claude argv {:out :string :err :string :timeout 600000})]
     (when (zero? exit)
       (try (let [j (json/parse-string out true)]
              {:text (:result j) :session-id (:session_id j)})
