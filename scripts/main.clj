@@ -23,7 +23,8 @@ code-search — Clojure code intelligence index
 
 Usage:
   code-search [QUERY ...]              search (default)
-  code-search index   SOURCE-DIR [opts]
+  code-search index      SOURCE-DIR [opts]
+  code-search index-deps [LIB-NAMES...]  pick deps.edn entries to index
   code-search search  QUERY...   [opts]
   code-search show    QUALIFIED-NAME [opts]
   code-search doctor
@@ -50,6 +51,9 @@ intended for AI coding agents.")))
 
       (= sub "index")
       (do (require 'scripts.index) (apply (resolve 'scripts.index/-main) rst))
+
+      (= sub "index-deps")
+      (do (require 'scripts.index-deps) (apply (resolve 'scripts.index-deps/-main) rst))
 
       (= sub "search")
       (do (require 'scripts.search) (apply (resolve 'scripts.search/-search-main) rst))
