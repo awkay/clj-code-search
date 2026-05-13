@@ -42,7 +42,9 @@
    "  --ns-boost LIST     Comma-separated substrings. SOFT BOOST: rows whose ns\n"
    "                      contains any listed substring rank higher (-2.0 to score).\n"
    "                      Default when neither --ns-filter nor --ns-boost supplied: \"lib,core\".\n"
-   "  --no-caller-boost   Disable the log(1+caller_count) ranking term.\n"
+   "  --no-caller-boost   Disable the caller_count ranking term.\n"
+   "  -v, --verbose       Verbose per-result output (file, gp, conf, tags, score).\n"
+   "                      Default: two-line compact (qualified-name + description).\n"
    "  --no-config         Ignore .code-search.edn.\n"
    "  --help              Show this message.\n"
    "\n"
@@ -73,7 +75,7 @@
    "     :caller-boost? true}\n"
    "\n"
    "Ranking:\n"
-   "  score = bm25 + ns_boost(-2.0 on match) - ln(1 + caller_count)\n"
+   "  score = bm25 + ns_boost(-2.0 on match) - 3 * ln(1 + caller_count)\n"
    "  Lower score = better match.\n"))
 
 (defn- parse-json [s] (when s (try (json/parse-string s true) (catch Exception _ nil))))
@@ -83,9 +85,13 @@
     (let [s (str/trim s)]
       (if (> (count s) n) (str (subs s 0 n) "…") s))))
 
-(defn- format-search-row [{:keys [qualified_name description_llm filename
-                                  line_start line_end general_purpose_score
-                                  confidence tags_llm ns caller_count score rank]}]
+(defn- format-search-row-compact [{:keys [qualified_name description_llm]}]
+  (str qualified_name "\n"
+       "  " (or description_llm "(no description)")))
+
+(defn- format-search-row-verbose [{:keys [qualified_name description_llm filename
+                                          line_start line_end general_purpose_score
+                                          confidence tags_llm caller_count score rank]}]
   (str qualified_name "\n"
        "  file: " filename ":" line_start "-" line_end "\n"
        "  desc: " (or description_llm "(no description)") "\n"
@@ -167,7 +173,7 @@
 
 (defn search!
   ([query] (search! query {}))
-  ([query {:keys [db limit mode format ns-filter ns-exclude ns-boost caller-boost?]
+  ([query {:keys [db limit mode format ns-filter ns-exclude ns-boost caller-boost? verbose?]
            :or {db default-db-path limit 5 mode :or format :plain caller-boost? true}}]
    (let [ns-boost* (cond
                      (seq ns-boost)   ns-boost
@@ -178,13 +184,13 @@
                                        :ns-filter ns-filter
                                        :ns-exclude ns-exclude
                                        :ns-boost ns-boost*
-                                       :caller-boost? caller-boost?})]
+                                       :caller-boost? caller-boost?})
+         row-fn (if verbose? format-search-row-verbose format-search-row-compact)]
      (case format
        :edn   (pp/pprint hits)
        :json  (println (json/generate-string hits {:pretty true}))
        (doseq [h hits]
-         (println (format-search-row h))
-         (println))))))
+         (println (row-fn h)))))))
 
 (defn show!
   ([qname] (show! qname {}))
@@ -215,6 +221,7 @@
       (= a "--ns-exclude")   (recur (rest rst) (assoc opts :ns-exclude (parse-csv (first rst))) positional)
       (= a "--ns-boost")     (recur (rest rst) (assoc opts :ns-boost   (parse-csv (first rst))) positional)
       (= a "--no-caller-boost") (recur rst (assoc opts :caller-boost? false) positional)
+      (or (= a "-v") (= a "--verbose")) (recur rst (assoc opts :verbose? true) positional)
       (= a "--no-config")    (recur rst (assoc opts :no-config? true) positional)
       (or (= a "--help") (= a "-h")) (recur rst (assoc opts :help? true) positional)
       :else                  (recur rst opts (conj positional a)))))

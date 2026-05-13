@@ -286,7 +286,7 @@
                     when neither :ns-filter nor :ns-boost is supplied (caller passes :default? true
                     to request that default). If :ns-filter is supplied and :ns-boost is empty,
                     no ns boost is applied.
-     :caller-boost? when true (default), subtract ln(1+caller_count) from score."
+     :caller-boost? when true (default), subtract 3*ln(1+caller_count) from score."
   ([db q] (fts-search db q {}))
   ([db q {:keys [limit mode ns-filter ns-exclude ns-boost caller-boost?]
           :or {limit 10 mode :or caller-boost? true}}]
@@ -314,7 +314,7 @@
            score (fn [{:keys [rank ns caller_count]}]
                    (let [boost (if (ns-matches-any? ns ns-boost) -2.0 0.0)
                          clog  (if caller-boost?
-                                 (- (Math/log (+ 1.0 (double (or caller_count 0)))))
+                                 (* -3.0 (Math/log (+ 1.0 (double (or caller_count 0)))))
                                  0.0)]
                      (+ (double (or rank 0.0)) boost clog)))]
        (->> rows
