@@ -104,13 +104,17 @@
 
 (defn- run-claude
   [model prompt]
-  (let [{:keys [out exit]} (sh-claude ["claude" "-p"
-                                       "--model" model
-                                       "--no-session-persistence"
-                                       "--output-format" "text"
-                                       prompt]
-                                      {:out :string :err :string :timeout 120000})]
-    (when (zero? exit) out)))
+  (let [{:keys [out err exit]} (sh-claude ["claude" "-p"
+                                           "--model" model
+                                           "--no-session-persistence"
+                                           "--output-format" "text"]
+                                          {:in prompt :out :string :err :string :timeout 120000})]
+    (if (zero? exit)
+      out
+      (do (binding [*out* *err*]
+            (println (format "[claude-cli] exit=%s err=%s"
+                             exit (some-> err str/trim (subs 0 (min 200 (count (or err ""))))))))
+          nil))))
 
 (defn analyze-fn
   "Run one analysis call. Returns the parsed JSON map; never throws.
@@ -186,13 +190,22 @@
                       "--model" model
                       "--no-session-persistence"
                       "--output-format" "json"]
-               resume-id (into ["--resume" resume-id])
-               true      (conj prompt))
-        {:keys [out exit]} (sh-claude argv {:out :string :err :string :timeout 600000})]
-    (when (zero? exit)
+               resume-id (into ["--resume" resume-id]))
+        {:keys [out err exit]} (sh-claude argv {:in prompt :out :string :err :string :timeout 600000})]
+    (if (zero? exit)
       (try (let [j (json/parse-string out true)]
              {:text (:result j) :session-id (:session_id j)})
-           (catch Exception _ nil)))))
+           (catch Exception e
+             (binding [*out* *err*]
+               (println (format "[claude-cli] JSON parse failed: %s; out-head=%s"
+                                (.getMessage e)
+                                (subs (or out "") 0 (min 200 (count (or out "")))))))
+             nil))
+      (do (binding [*out* *err*]
+            (let [errs (or err "")]
+              (println (format "[claude-cli] exit=%s err=%s"
+                               exit (subs errs 0 (min 300 (count errs)))))))
+          nil))))
 
 (defn- build-resume-prompt [missing-qnames]
   (str "You missed some functions in your previous EDN response. "
@@ -229,7 +242,13 @@
                                                    :resume-id (:session-id first-rsp))]
                       (or (some-> resumed :text extract-edn-map) {}))
                     {})
-        merged    (merge parsed1 parsed2)]
+        merged    (merge parsed1 parsed2)
+        stubbed   (remove merged wanted)]
+    (when (seq stubbed)
+      (binding [*out* *err*]
+        (println (format "[claude-cli] %d/%d fn(s) stubbed (no LLM result); first: %s"
+                         (count stubbed) (count wanted)
+                         (str/join ", " (take 3 stubbed))))))
     (into {}
           (for [qname wanted]
             [qname (or (get merged qname) stub)]))))
