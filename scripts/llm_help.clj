@@ -30,6 +30,14 @@ code-search 'validate an email address'
 code-search 'format a date for display'
 code-search 'send a push notification'
 
+# Useful flags (full list: `code-search --help`):
+#   --ns-filter LIST    hard-include: only nses containing any csv substring
+#   --ns-exclude LIST   hard-exclude: drop nses containing any csv substring
+#   --ns-boost LIST     soft boost (default: \"lib,core\" when no filter given)
+#   --no-caller-boost   disable the caller_count ranking term
+#   --limit N           more/fewer results (default 5)
+#   -v, --verbose       expanded per-result output (file, gp, conf, tags, score)
+
 # 2. INSPECT a candidate before using it.
 #    This returns a full \"function card\": args, purity, description,
 #    docstring, real call-site examples, callers, callees.
@@ -41,14 +49,39 @@ code-search show com.acme.util.date/->display-str
 
 ### How to read search results
 
-Each result includes:
-- `qualified_name` — `ns/name`. If the same name appears in clj and cljs
-  with different bodies, you'll see two rows tagged by `lang`.
-- `desc` — one-sentence description of what the function does.
+Default output is two lines per hit:
+
+```
+ns/name
+  one-sentence description
+```
+
+Pass `-v` for the verbose form, which adds:
+- `file:line_start-line_end` — exact source location.
 - `gp` — general-purpose score (0..1). High = pure utility; low = domain-specific.
 - `conf` — confidence (0..1) of the description.
+- `callers` — number of call-sites in the indexed tree.
 - `tags` — semantic keywords.
-- `rank` — BM25 score (more negative = better match).
+- `score` — final ranking score (more negative = better match). Composed of
+  BM25 + ns boost (-2.0 on match) − 3·ln(1 + caller_count). Library-ish
+  namespaces and well-used functions are deliberately preferred.
+
+CLJC files emit one row per language; if the same `ns/name` appears for both
+clj and cljs with different bodies you'll see two hits.
+
+### Project defaults: .code-search.edn
+
+If the repo has a `.code-search.edn` (searched upward from cwd), its keys act
+as defaults under any CLI flags. Useful for tuning a project's preferences
+without retyping flags. Example:
+
+```clojure
+{:limit      20
+ :ns-boost   [\"lib\" \"core\" \"util\"]
+ :ns-exclude [\"test\" \"spec\"]}
+```
+
+Pass `--no-config` to ignore it for one invocation.
 
 ### Decision rule
 
