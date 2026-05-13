@@ -475,7 +475,7 @@
   "Extract one coord's jar, run kondo, batch-LLM-analyze each source file, and
    store public fns with LLM results. Filenames are rewritten to logical
    `deps/...` paths before DB write."
-  [db {:keys [model parallel]} tmp-root {:keys [i n]} {:keys [lib version] :as coord}]
+  [db {:keys [model parallel chunk-size debug?]} tmp-root {:keys [i n]} {:keys [lib version] :as coord}]
   (let [head (format "[%d/%d] %s %s" i n lib version)
         jar  (m2-jar-file coord)]
     (cond
@@ -516,9 +516,11 @@
                    (let [t0  (System/currentTimeMillis)
                          src (try (slurp filename) (catch Exception _ ""))
                          res (claude-cli/analyze-file
-                              {:model       model
-                               :file-source src
-                               :fn-records  recs})
+                              (cond-> {:model       model
+                                       :file-source src
+                                       :fn-records  recs
+                                       :debug?      debug?}
+                                chunk-size (assoc :chunk-size chunk-size)))
                          ms  (- (System/currentTimeMillis) t0)]
                      (swap! done + (count recs))
                      (progress! (format "%s — LLM %d/%d (lint %d ms, last file %d ms)"
@@ -566,6 +568,8 @@
         (= a "--tmp-root")   (recur (assoc opts :tmp-root (first rst)) (next rst))
         (= a "--model")      (recur (assoc opts :model (first rst)) (next rst))
         (= a "--parallel")   (recur (assoc opts :parallel (Integer/parseInt (first rst))) (next rst))
+        (= a "--chunk-size") (recur (assoc opts :chunk-size (Integer/parseInt (first rst))) (next rst))
+        (= a "--debug")      (recur (assoc opts :debug? true) rst)
         (or (= a "-h") (= a "--help"))
         (recur (assoc opts :help? true) rst)
         :else                (recur (update opts :selectors conj a) rst))
@@ -585,6 +589,10 @@ Usage:
   code-search index-deps --no-fast               full LLM analysis (slow; uses ~/.claude CLI)
   code-search index-deps --model NAME            LLM model (default: $CODE_INDEX_CLAUDE_MODEL or haiku)
   code-search index-deps --parallel N            concurrent LLM file-batches (default 20)
+  code-search index-deps --chunk-size N          fns per LLM call (default 25; lower if responses truncate)
+  code-search index-deps --debug                 dump raw LLM output head when parsing fails
+
+Note: passing --all or LIB-NAMES bypasses the TUI even on a TTY (good for scripted runs).
 
 Fast mode (default):
   • No LLM calls.
@@ -651,10 +659,11 @@ Fast mode (default):
       (let [candidates (read-candidates deps-file)]
         (if (empty? candidates)
           (println (str "No :mvn/version deps found in " deps-file))
-          (let [tty?   (and (term/tty? :stdin) (term/tty? :stdout))
-                result (if tty?
-                         (run-tui candidates)
-                         (non-tty-run candidates opts))]
+          (let [tty?       (and (term/tty? :stdin) (term/tty? :stdout))
+                explicit?  (or (:all? opts) (seq (:selectors opts)))
+                result     (if (and tty? (not explicit?))
+                             (run-tui candidates)
+                             (non-tty-run candidates opts))]
             (case (:action result)
               :quit  (println "Cancelled.")
               :index (let [picked (map candidates (sort (:checked result)))]

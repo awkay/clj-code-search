@@ -215,26 +215,31 @@
        ":tags, :domain_signals, :general_purpose_score, :confidence). "
        "EDN ONLY. No markdown fences. No commentary."))
 
-(defn analyze-file
-  "Batch-analyze every fn-record in `fn-records` (all from the same file).
-   `file-source` is the full text of that file. Returns a map of
-   qualified-name -> result map (snake_case keys, same shape as analyze-fn).
+(def ^:private stub-result
+  {:description           "<analysis failed>"
+   :arg_descriptions      []
+   :return_description    ""
+   :tags                  []
+   :domain_signals        []
+   :general_purpose_score 0.0
+   :confidence            0.0})
 
-   Strategy: one batched call; if any names are missing from the response,
-   resume the session and ask for just the missing ones. Stragglers after
-   resume get a confidence=0 stub."
-  [{:keys [model file-source fn-records] :or {model default-model}}]
-  (let [prompt   (build-batch-prompt file-source fn-records)
-        wanted   (set (map :qualified-name fn-records))
-        stub     {:description           "<analysis failed>"
-                  :arg_descriptions      []
-                  :return_description    ""
-                  :tags                  []
-                  :domain_signals        []
-                  :general_purpose_score 0.0
-                  :confidence            0.0}
+(def ^:private default-chunk-size
+  (Integer/parseInt (or (System/getenv "CODE_INDEX_BATCH_CHUNK") "25")))
+
+(defn- analyze-file-chunk
+  "One LLM call covering this chunk of fn-records. Tries the resume protocol
+   for any names missing from the first response. Returns qname -> result map."
+  [model file-source fn-records debug?]
+  (let [prompt    (build-batch-prompt file-source fn-records)
+        wanted    (set (map :qualified-name fn-records))
         first-rsp (run-claude-json model prompt)
-        parsed1   (or (some-> first-rsp :text extract-edn-map) {})
+        text1     (:text first-rsp)
+        parsed1   (or (some-> text1 extract-edn-map) {})
+        _         (when (and debug? (empty? parsed1))
+                    (binding [*out* *err*]
+                      (println (format "[claude-cli][debug] empty parse; text-head=%s"
+                                       (subs (or text1 "") 0 (min 400 (count (or text1 ""))))))))
         missing   (vec (remove parsed1 wanted))
         parsed2   (if (and (seq missing) (:session-id first-rsp))
                     (let [resumed (run-claude-json model
@@ -246,9 +251,23 @@
         stubbed   (remove merged wanted)]
     (when (seq stubbed)
       (binding [*out* *err*]
-        (println (format "[claude-cli] %d/%d fn(s) stubbed (no LLM result); first: %s"
+        (println (format "[claude-cli] %d/%d fn(s) stubbed in chunk; first: %s"
                          (count stubbed) (count wanted)
                          (str/join ", " (take 3 stubbed))))))
     (into {}
           (for [qname wanted]
-            [qname (or (get merged qname) stub)]))))
+            [qname (or (get merged qname) stub-result)]))))
+
+(defn analyze-file
+  "Batch-analyze every fn-record in `fn-records` (all from the same file).
+   `file-source` is the full text of that file. Chunks the records so the
+   response fits in a single model output. Returns a map of qualified-name
+   -> result map (snake_case keys, same shape as analyze-fn)."
+  [{:keys [model file-source fn-records chunk-size debug?]
+    :or   {model default-model chunk-size default-chunk-size}}]
+  (let [chunks (partition-all (max 1 chunk-size) fn-records)]
+    (reduce
+     (fn [acc recs]
+       (merge acc (analyze-file-chunk model file-source recs debug?)))
+     {}
+     chunks)))
