@@ -86,6 +86,23 @@
   [path]
   (open-with-schema path "functions" "schema/code_index.sql"))
 
+(defn ensure-embeddings-schema!
+  "Idempotently create the embeddings table + index + cleanup trigger on an
+   existing DB. Safe to call every open. Lets us add embeddings to indexes that
+   were created before this feature shipped."
+  [db]
+  (doseq [stmt ["CREATE TABLE IF NOT EXISTS embeddings (
+                   function_id INTEGER PRIMARY KEY REFERENCES functions(id) ON DELETE CASCADE,
+                   model TEXT NOT NULL,
+                   dim INTEGER NOT NULL,
+                   content_sha TEXT NOT NULL,
+                   vec TEXT NOT NULL,
+                   embedded_at TEXT)"
+                "CREATE INDEX IF NOT EXISTS idx_embeddings_model ON embeddings(model)"
+                "CREATE TRIGGER IF NOT EXISTS functions_ad_embeddings AFTER DELETE ON functions
+                   BEGIN DELETE FROM embeddings WHERE function_id = old.id; END"]]
+    (sqlite/execute! db [stmt])))
+
 (defn rebuild-fts!
   "Drop and recreate functions_fts + triggers (picks up tokenizer changes) and
    reindex from the functions table. Safe one-shot migration."
@@ -301,7 +318,7 @@
                       (when exclude-frag (str " AND " exclude-frag)))
            ;; Fetch a wider pool so post-rerank can reorder before truncation.
            pool-size (max (* limit 10) 200)
-           sql (str "SELECT f.qualified_name, f.description_llm, f.general_purpose_score,
+           sql (str "SELECT f.id, f.qualified_name, f.description_llm, f.general_purpose_score,
                             f.confidence, f.tags_llm, f.filename, f.line_start, f.line_end,
                             f.ns, f.caller_count,
                             bm25(functions_fts) AS rank

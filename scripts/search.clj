@@ -15,7 +15,8 @@
    [clojure.java.io :as io]
    [clojure.pprint :as pp]
    [clojure.string :as str]
-   [scripts.lib.db :as db]))
+   [scripts.lib.db :as db]
+   [scripts.lib.embeddings :as emb]))
 
 (def default-db-path
   (or (System/getenv "CODE_INDEX_DB")
@@ -44,6 +45,10 @@
    "                      Default when neither --ns-filter nor --ns-boost supplied: \"lib,core\".\n"
    "  --boost-amount N    Magnitude of the ns boost (positive number, default 10.0).\n"
    "  --no-caller-boost   Disable the caller_count ranking term.\n"
+   "  --no-embeddings     Skip the semantic-search leg even if embeddings exist.\n"
+   "  --embeddings-only   Use only semantic similarity (no lexical leg / no fusion).\n"
+   "  --embedding-model NAME  Ollama model to embed the query with\n"
+   "                          (default 'nomic-embed-text'; must match what was indexed).\n"
    "  -v, --verbose       Verbose per-result output (file, gp, conf, tags, score).\n"
    "                      Default: two-line compact (qualified-name + description).\n"
    "  --no-config         Ignore .code-search.edn.\n"
@@ -173,22 +178,101 @@
           (println "warn: failed to read" (.getPath f) "—" (.getMessage e)))
         nil))))
 
+(defn- ns-passes?
+  "Apply ns-filter (include-any) and ns-exclude (drop-any) to a row's ns."
+  [{:keys [ns]} {:keys [ns-filter ns-exclude]}]
+  (let [lns (some-> ns str/lower-case)
+        contains-any? (fn [subs]
+                        (some #(str/includes? lns (str/lower-case %)) subs))]
+    (and (or (empty? ns-filter)  (and lns (contains-any? ns-filter)))
+         (or (empty? ns-exclude) (not (and lns (contains-any? ns-exclude)))))))
+
+(defn- hydrate-rows
+  "Fetch full rows by id for the given ordered ids, preserving order."
+  [db ids]
+  (when (seq ids)
+    (let [placeholders (str/join "," (repeat (count ids) "?"))
+          sql (str "SELECT id, qualified_name, description_llm, general_purpose_score,
+                           confidence, tags_llm, filename, line_start, line_end,
+                           ns, caller_count
+                      FROM functions WHERE id IN (" placeholders ")")
+          by-id (into {} (map (juxt :id identity) (apply db/query db sql ids)))]
+      (keep by-id ids))))
+
+(defn- semantic-rank
+  "Returns a seq of {:id ... :score (dot)} for the top semantic hits, or nil
+   if semantic search is unavailable."
+  [db model query pool-size]
+  (when (and (emb/has-embeddings? db model)
+             (emb/ollama-reachable?))
+    (try
+      (let [qv     (-> (emb/embed query {:model model})
+                       emb/vec->blob-str
+                       emb/blob-str->floats)
+            corpus (emb/load-corpus db model)
+            hits   (emb/top-k qv corpus pool-size)]
+        (mapv (fn [{:keys [function_id score]}]
+                {:id function_id :score score})
+              hits))
+      (catch Exception _ nil))))
+
 (defn search!
   ([query] (search! query {}))
   ([query {:keys [db limit mode format ns-filter ns-exclude ns-boost
-                  caller-boost? boost-amount verbose?]
-           :or {db default-db-path limit 5 mode :or format :plain caller-boost? true}}]
+                  caller-boost? boost-amount verbose?
+                  embeddings? embeddings-only? embedding-model]
+           :or {db default-db-path limit 5 mode :or format :plain caller-boost? true
+                embeddings? true embedding-model emb/default-model}}]
    (let [ns-boost* (cond
                      (seq ns-boost)   ns-boost
-                     (seq ns-filter)  nil          ; explicit filter replaces default boost
+                     (seq ns-filter)  nil
                      :else            default-boost-ns)
-         hits (db/fts-search db query (cond-> {:limit limit
-                                               :mode mode
-                                               :ns-filter ns-filter
-                                               :ns-exclude ns-exclude
-                                               :ns-boost ns-boost*
-                                               :caller-boost? caller-boost?}
-                                        boost-amount (assoc :boost-amount boost-amount)))
+         common-opts {:ns-boost ns-boost*
+                      :caller-boost? caller-boost?
+                      :boost-amount (or boost-amount 10.0)
+                      :ns-filter ns-filter
+                      :ns-exclude ns-exclude}
+         pool-size (max (* limit 10) 200)
+
+         ;; Lexical leg
+         lex-hits (when-not embeddings-only?
+                    (db/fts-search db query (-> common-opts
+                                                (assoc :limit limit :mode mode))))
+
+         ;; Semantic leg (auto-detect)
+         sem-rank (when (and embeddings? (or embeddings-only?
+                                             (emb/has-embeddings? db embedding-model)))
+                    (semantic-rank db embedding-model query pool-size))
+
+         use-sem? (and embeddings? (seq sem-rank))
+
+         hits
+         (cond
+           ;; Both available — fuse with RRF
+           (and use-sem? (seq lex-hits))
+           (let [;; Re-pull a wide lexical pool (ranked) so RRF has rank context
+                 lex-pool   (db/fts-search db query
+                                           (-> common-opts
+                                               (assoc :limit pool-size :mode mode)))
+                 lex-ids    (mapv :id lex-pool)
+                 sem-ids    (mapv :id sem-rank)
+                 fused-ids  (emb/rrf-merge [lex-ids sem-ids])
+                 rows       (hydrate-rows db fused-ids)
+                 filtered   (filter #(ns-passes? % common-opts) rows)]
+             (vec (take limit filtered)))
+
+           use-sem?
+           (let [rows        (hydrate-rows db (mapv :id sem-rank))
+                 score-by-id (into {} (map (juxt :id :score) sem-rank))]
+             (->> rows
+                  (filter #(ns-passes? % common-opts))
+                  (map #(assoc % :score (score-by-id (:id %))))
+                  (take limit)
+                  vec))
+
+           :else
+           lex-hits)
+
          row-fn (if verbose? format-search-row-verbose format-search-row-compact)]
      (case format
        :edn   (pp/pprint hits)
@@ -226,6 +310,9 @@
       (= a "--ns-boost")     (recur (rest rst) (assoc opts :ns-boost   (parse-csv (first rst))) positional)
       (= a "--no-caller-boost") (recur rst (assoc opts :caller-boost? false) positional)
       (= a "--boost-amount") (recur (rest rst) (assoc opts :boost-amount (Double/parseDouble (first rst))) positional)
+      (= a "--no-embeddings")    (recur rst (assoc opts :embeddings? false) positional)
+      (= a "--embeddings-only")  (recur rst (assoc opts :embeddings-only? true) positional)
+      (= a "--embedding-model")  (recur (rest rst) (assoc opts :embedding-model (first rst)) positional)
       (or (= a "-v") (= a "--verbose")) (recur rst (assoc opts :verbose? true) positional)
       (= a "--no-config")    (recur rst (assoc opts :no-config? true) positional)
       (or (= a "--help") (= a "-h")) (recur rst (assoc opts :help? true) positional)

@@ -10,13 +10,15 @@
                                       'scripts.lib.sha-test
                                       'scripts.lib.analysis-test
                                       'scripts.lib.kondo-test
-                                      'scripts.lib.db-test)
+                                      'scripts.lib.db-test
+                                      'scripts.lib.embeddings-test)
                              (let [run-tests (resolve 'clojure.test/run-tests)
                                    {:keys [fail error]}
                                    (run-tests 'scripts.lib.sha-test
                                               'scripts.lib.analysis-test
                                               'scripts.lib.kondo-test
-                                              'scripts.lib.db-test)]
+                                              'scripts.lib.db-test
+                                              'scripts.lib.embeddings-test)]
                                (System/exit (if (zero? (+ fail error)) 0 1))))}
          nrepl    {:doc  "Start a babashka nREPL server on :1667"
                    :task (do (require 'babashka.nrepl.server)
@@ -33,6 +35,9 @@
          index     {:doc  "bb index [opts] SOURCE-DIR"
                     :task (do (require 'scripts.main)
                               (apply (resolve 'scripts.main/-main) "index" *command-line-args*))}
+         embed-index {:doc  "bb embed-index [opts] — build/refresh Ollama embeddings"
+                      :task (do (require 'scripts.main)
+                                (apply (resolve 'scripts.main/-main) "embed-index" *command-line-args*))}
          search    {:doc  "bb search [opts] QUERY..."
                     :task (do (require 'scripts.main)
                               (apply (resolve 'scripts.main/-main) "search" *command-line-args*))}

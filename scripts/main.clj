@@ -25,6 +25,7 @@ Usage:
   code-search [QUERY ...]              search (default)
   code-search index      SOURCE-DIR [opts]
   code-search index-deps [LIB-NAMES...]  pick deps.edn entries to index
+  code-search embed-index [opts]         build semantic-search vectors (Ollama)
   code-search search  QUERY...   [opts]
   code-search show    QUALIFIED-NAME [opts]
   code-search doctor
@@ -54,6 +55,9 @@ intended for AI coding agents.")))
 
       (= sub "index-deps")
       (do (require 'scripts.index-deps) (apply (resolve 'scripts.index-deps/-main) rst))
+
+      (= sub "embed-index")
+      (do (require 'scripts.embed) (apply (resolve 'scripts.embed/-main) rst))
 
       (= sub "search")
       (do (require 'scripts.search) (apply (resolve 'scripts.search/-search-main) rst))

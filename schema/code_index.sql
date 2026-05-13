@@ -102,3 +102,24 @@ CREATE TRIGGER IF NOT EXISTS functions_au AFTER UPDATE ON functions BEGIN
   INSERT INTO functions_fts(rowid, qualified_name, description_llm, docstring, tags_llm, domain_signals_llm)
     VALUES (new.id, new.qualified_name, new.description_llm, new.docstring, new.tags_llm, new.domain_signals_llm);
 END;
+
+-- Optional embeddings layer. Populated by `code-search embed-index`. Stores one
+-- normalized float32 vector per function for the current model. content_sha is
+-- the SHA of the text that was embedded — used to skip re-embedding when the
+-- LLM-described summary hasn't changed. If the model name changes, all rows
+-- for the old model should be deleted (do a rebuild).
+CREATE TABLE IF NOT EXISTS embeddings (
+  function_id    INTEGER PRIMARY KEY REFERENCES functions(id) ON DELETE CASCADE,
+  model          TEXT    NOT NULL,
+  dim            INTEGER NOT NULL,
+  content_sha    TEXT    NOT NULL,
+  vec            TEXT    NOT NULL,       -- base64 of normalized float32 LE, length = dim*4 bytes
+  embedded_at    TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_embeddings_model ON embeddings(model);
+
+-- Clean up embeddings when their function disappears.
+CREATE TRIGGER IF NOT EXISTS functions_ad_embeddings AFTER DELETE ON functions BEGIN
+  DELETE FROM embeddings WHERE function_id = old.id;
+END;
