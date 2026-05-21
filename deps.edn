@@ -1,4 +1,4 @@
-;; Manifest for tools.deps-based installers (notably `bbin install io.github.awkay/claude-tools`).
+;; Manifest for tools.deps-based installers (notably `bbin install io.github.awkay/clj-code-search`).
 ;;
 ;; Day-to-day development happens via `bb` and bb.edn — this file only exists
 ;; so that the git-coordinate resolution path bbin uses can find a manifest.

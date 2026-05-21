@@ -13,7 +13,7 @@ A small babashka-native toolset that gives an AI coding agent on-demand access t
 ## Install
 
 ```bash
-bbin install io.github.awkay/claude-tools
+bbin install io.github.awkay/clj-code-search
 code-search --help
 ```
 
@@ -88,7 +88,7 @@ The Anthropic-API-direct path (using an API key, not Max) would be ~20× faster 
 ## Repository layout
 
 ```
-claude-tools/
+clj-code-search/
 ├── PLAN.md                          ← this file
 ├── bb.edn                           ← bb tasks + pod deps + :bbin/bin entry
 ├── .gitignore                       ← WAL sidecars, .clj-kondo cache

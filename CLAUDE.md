@@ -5,7 +5,7 @@
 This repo ships two manifest files at the root:
 
 - **`bb.edn`** — used by `bb` for local development (tasks, pods, paths).
-- **`deps.edn`** — used by `tools.deps` so that `bbin install io.github.awkay/claude-tools`
+- **`deps.edn`** — used by `tools.deps` so that `bbin install io.github.awkay/clj-code-search`
   can resolve the project as a git library. (bbin shells out to clojure CLI to
   build a classpath, which requires `deps.edn`.)
 

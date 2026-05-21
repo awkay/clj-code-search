@@ -13,7 +13,7 @@ Everything lives in a single SQLite + FTS5 database in the project root.
 ## Install
 
 ```bash
-bbin install io.github.awkay/claude-tools
+bbin install io.github.awkay/clj-code-search
 code-search doctor    # checks clj-kondo, claude, bb
 ```
 
@@ -121,7 +121,7 @@ stays accurate even when most rows are skip-cached.
 ## Repo layout
 
 ```
-claude-tools/
+clj-code-search/
 ├── bb.edn                      bb tasks + pod deps + :bbin/bin entry
 ├── schema/code_index.sql       SQLite schema (loaded via classpath)
 ├── scripts/

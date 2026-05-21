@@ -1,7 +1,7 @@
 {:pods  {org.babashka/go-sqlite3 {:version "0.3.9"}}
  :paths ["." "test"]
 
- ;; bbin install entry. Once published, `bbin install io.github.tonykay/claude-tools`
+ ;; bbin install entry. Once published, `bbin install io.github.awkay/clj-code-search`
  ;; creates a `code-search` command on PATH that runs scripts.main/-main.
  :bbin/bin {code-search {:main-opts ["-m" "scripts.main"]}}
 
