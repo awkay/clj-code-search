@@ -308,7 +308,7 @@
 ;; Fast indexing (no LLM)
 ;; -----------------------------------------------------------------------------
 
-(defn- trim-docstring
+(defn trim-docstring
   "Collapse internal whitespace to single spaces, trim, and cap at 200 chars
    (with `…` suffix if truncated). Returns nil on nil/blank input."
   [s]
@@ -318,7 +318,7 @@
         (str (subs collapsed 0 199) "…")
         collapsed))))
 
-(defn- fast-record?
+(defn fast-record?
   "Public def with a non-blank docstring."
   [fn-rec]
   (and (not (:private? fn-rec))
@@ -333,7 +333,7 @@
               (str logical-prefix "/" (subs fname (count temp-prefix)))
               fname))))
 
-(defn- fast-store!
+(defn fast-store!
   "Write one minimal row per public+docstringed fn. The trimmed docstring
    is stored in description_llm so the FTS index picks it up alongside
    the raw docstring."

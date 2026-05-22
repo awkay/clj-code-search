@@ -12,6 +12,7 @@
   (:require
    [clojure.string :as str]
    [scripts.doctor :as doctor]
+   [scripts.index-deps :as index-deps]
    [scripts.lib.claude-cli :as claude-cli]
    [scripts.lib.db :as db]
    [scripts.lib.kondo :as kondo]))
@@ -103,6 +104,29 @@
      0
      by-file)))
 
+(defn run-fast-pipeline
+  "Docstring-only (no LLM) pipeline. Stores one row per public+docstringed fn
+   among the records that need processing; cached rows are reported but not
+   touched. Returns a seq of {:qname :ms :source} for symmetry."
+  [db fn-records]
+  (pre-delete-orphans! db fn-records)
+  (let [{cached true to-do false} (group-by #(fn-already-indexed? db %) fn-records)
+        _ (binding [*out* *err*]
+            (doseq [fn-rec cached]
+              (println (format "  [SKIP] %s (sha cached)" (:qualified-name fn-rec)))))
+        eligible (filter index-deps/fast-record? to-do)
+        skipped  (- (count to-do) (count eligible))]
+    (binding [*out* *err*]
+      (when (pos? skipped)
+        (println (format "  [FAST] skipping %d private/undocumented fn(s)" skipped))))
+    (doseq [fn-rec eligible]
+      (index-deps/fast-store! db fn-rec))
+    (concat
+     (for [fn-rec cached]
+       {:qname (:qualified-name fn-rec) :ms 0 :source :cached})
+     (for [fn-rec eligible]
+       {:qname (:qualified-name fn-rec) :ms 0 :source :fast}))))
+
 (defn run-pipeline
   "Per-file batch pipeline: pre-delete orphans → group by file → one LLM call
    per file (parallel across files) → serial DB writes.
@@ -174,6 +198,8 @@
       (= a "--model")    (recur (rest rst) (assoc opts :model (first rst)) positional)
       (= a "--parallel") (recur (rest rst) (assoc opts :parallel (Integer/parseInt (first rst))) positional)
       (= a "--force")    (recur rst (assoc opts :force? true) positional)
+      (= a "--fast")     (recur rst (assoc opts :fast? true) positional)
+      (= a "--no-fast")  (recur rst (assoc opts :fast? false) positional)
       :else              (recur rst opts (conj positional a)))))
 
 (defn- pct [xs p]
@@ -185,13 +211,17 @@
   (let [[opts pos] (parse-args args)
         source-dir (first pos)]
     (when (or (nil? source-dir) (str/blank? source-dir))
-      (println "usage: bb index [--db PATH] [--model NAME] [--parallel N] [--force] SOURCE-DIR")
+      (println "usage: bb index [--db PATH] [--model NAME] [--parallel N] [--force] [--fast] SOURCE-DIR")
       (System/exit 1))
     (binding [*out* *err*]
-      (println "index: model =" (:model opts)
-               "parallel =" (:parallel opts)
-               "source =" source-dir)
-      (when-not (doctor/ensure!) (System/exit 1)))
+      (if (:fast? opts)
+        (println "index: mode = fast (no LLM) source =" source-dir)
+        (println "index: model =" (:model opts)
+                 "parallel =" (:parallel opts)
+                 "source =" source-dir))
+      (when (and (not (:fast? opts))
+                 (not (doctor/ensure!)))
+        (System/exit 1)))
     (let [db        (db/open (:db opts))
           _         (binding [*out* *err*] (println "index: linting" source-dir))
           all-recs  (kondo/analyze source-dir)
@@ -205,9 +235,12 @@
                       (println "  file-SHA cache: skip" (count skip-untouched) "fns;"
                                "process" (count to-process) "fns"))
           t0        (System/currentTimeMillis)
-          rows      (doall (run-pipeline db opts to-process))
+          rows      (doall (if (:fast? opts)
+                             (run-fast-pipeline db to-process)
+                             (run-pipeline db opts to-process)))
           wall-ms   (- (System/currentTimeMillis) t0)
           llm-rows  (filter #(= :llm (:source %)) rows)
+          fast-rows (filter #(= :fast (:source %)) rows)
           ms        (map :ms llm-rows)]
       ;; Update file-SHA records for ALL files we saw (even unchanged — keeps cache fresh)
       (doseq [[file sha] file-shas]
@@ -219,10 +252,13 @@
       (printf "  file-skipped:  %d (file SHA unchanged)\n" (count skip-untouched))
       (printf "  fn-skipped:    %d (function SHA unchanged)\n"
               (count (filter #(= :cached (:source %)) rows)))
-      (printf "  LLM:           %d" (count llm-rows))
-      (when (seq ms)
-        (printf "  (p50=%d  p95=%d  max=%d ms)" (pct ms 0.5) (pct ms 0.95) (apply max ms)))
-      (println)
+      (if (:fast? opts)
+        (printf "  fast-indexed:  %d (public+docstring, no LLM)\n" (count fast-rows))
+        (do
+          (printf "  LLM:           %d" (count llm-rows))
+          (when (seq ms)
+            (printf "  (p50=%d  p95=%d  max=%d ms)" (pct ms 0.5) (pct ms 0.95) (apply max ms)))
+          (println)))
       (println "  DB rows total:"
                (-> (db/query (:db opts) "SELECT COUNT(*) AS n FROM functions")
                    first :n)))))

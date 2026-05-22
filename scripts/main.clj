@@ -50,6 +50,7 @@ Index options (index):
   --model NAME              claude model alias (default haiku)
   --parallel N              concurrent LLM calls (default 20)
   --force                   ignore caches
+  --fast                    no-LLM indexing of public docstrings (default: LLM)
 
 index-deps options:
   --all                     non-TTY: select every maven dep
