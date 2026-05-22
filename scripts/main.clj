@@ -33,15 +33,42 @@ Usage:
 Common options:
   --db PATH          SQLite path (default .code-intelligence/code-index.db
                      or $CODE_INDEX_DB)
-  --format plain|edn|json   (search/show)
-  --limit N          (search)
-  --mode or|and      (search; default or)
-  --model NAME       claude model alias (index; default haiku)
-  --parallel N       concurrent LLM calls (index; default 20)
-  --force            ignore caches (index)
 
-`code-search --help` prints this; `code-search llm-help` prints instructions
-intended for AI coding agents.")))
+Search options:
+  --format plain|edn|json
+  --limit N
+  --mode or|and             default or
+  --ns-filter CSV           restrict to namespaces (substring match)
+  --ns-exclude CSV          exclude namespaces
+  --ns-boost CSV            boost results in matching namespaces
+  --boost-amount F          boost magnitude (default project config)
+  --no-caller-boost         disable caller-graph boosting
+  --no-config               ignore project .code-intelligence/config.edn
+  -v, --verbose
+
+Index options (index):
+  --model NAME              claude model alias (default haiku)
+  --parallel N              concurrent LLM calls (default 20)
+  --force                   ignore caches
+
+index-deps options:
+  --all                     non-TTY: select every maven dep
+  --fast                    no-LLM indexing of public docstrings (default)
+  --no-fast                 full LLM analysis (slower, costs tokens)
+  --deps-file PATH          alternate deps.edn
+  --tmp-root DIR            temp extract root (default /tmp/claude-tools-deps)
+  --model NAME              LLM model (default $CODE_INDEX_CLAUDE_MODEL or haiku)
+  --parallel N              concurrent LLM file-batches (default 20)
+  --chunk-size N            fns per LLM call (default 25)
+  --debug                   dump raw LLM output head on parse failure
+
+For full per-subcommand help:
+  code-search index      --help
+  code-search index-deps --help
+  code-search search     --help
+  code-search show       --help
+
+`code-search llm-help` prints instructions intended for AI coding agents.")))
 
 (defn -main [& args]
   (let [[sub & rst] args]
